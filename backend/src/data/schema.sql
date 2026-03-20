@@ -16,7 +16,7 @@ CREATE TABLE gebruikers (
 
 CREATE TABLE profielen (
   id                        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  gebruiker_id              UUID REFERENCES gebruikers(id) ON DELETE CASCADE,
+  gebruiker_id              UUID REFERENCES gebruikers(id) ON DELETE CASCADE UNIQUE,
   aangemaakt_op             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   bijgewerkt_op             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

@@ -137,7 +137,7 @@ profielenRouter.post('/', async (req: Request, res: Response, next: NextFunction
     );
     const gebruikerId = gebruikerResult.rows[0].id;
 
-    // Profiel aanmaken
+    // Profiel aanmaken of bijwerken (upsert — één profiel per gebruiker)
     const profielResult = await client.query<{ id: string }>(
       `INSERT INTO profielen (
          gebruiker_id, postcode, huisnummer,
@@ -145,6 +145,20 @@ profielenRouter.post('/', async (req: Request, res: Response, next: NextFunction
          heeft_zonnepanelen, jaar_opwek_kwh, jaar_teruglevering_kwh,
          voorkeur, interesse_batterij, interesse_ev, interesse_warmtepomp
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (gebruiker_id) DO UPDATE SET
+         postcode = EXCLUDED.postcode,
+         huisnummer = EXCLUDED.huisnummer,
+         jaar_verbruik_kwh = EXCLUDED.jaar_verbruik_kwh,
+         jaar_verbruik_gas_m3 = EXCLUDED.jaar_verbruik_gas_m3,
+         meter_type = EXCLUDED.meter_type,
+         heeft_zonnepanelen = EXCLUDED.heeft_zonnepanelen,
+         jaar_opwek_kwh = EXCLUDED.jaar_opwek_kwh,
+         jaar_teruglevering_kwh = EXCLUDED.jaar_teruglevering_kwh,
+         voorkeur = EXCLUDED.voorkeur,
+         interesse_batterij = EXCLUDED.interesse_batterij,
+         interesse_ev = EXCLUDED.interesse_ev,
+         interesse_warmtepomp = EXCLUDED.interesse_warmtepomp,
+         bijgewerkt_op = NOW()
        RETURNING id`,
       [
         gebruikerId,
@@ -164,7 +178,12 @@ profielenRouter.post('/', async (req: Request, res: Response, next: NextFunction
     );
     const profielId = profielResult.rows[0].id;
 
-    // Contract opslaan
+    // Huidig contract archiveren en nieuw contract opslaan
+    await client.query(
+      `UPDATE contracten SET is_huidig = FALSE WHERE profiel_id = $1 AND is_huidig = TRUE`,
+      [profielId],
+    );
+
     await client.query(
       `INSERT INTO contracten (
          profiel_id, leverancier_slug, product_naam, type, einddatum,
@@ -201,7 +220,7 @@ profielenRouter.post('/', async (req: Request, res: Response, next: NextFunction
 
 profielenRouter.get('/gebruiker/:gebruikerId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await db.query(`${PROFIEL_SELECT} WHERE g.id = $1`, [req.params.gebruikerId]);
+    const result = await db.query(`${PROFIEL_SELECT} WHERE g.id = $1 ORDER BY p.bijgewerkt_op DESC LIMIT 1`, [req.params.gebruikerId]);
 
     if (result.rowCount === 0) {
       res.status(404).json({ error: 'Geen profiel gevonden voor deze gebruiker' });

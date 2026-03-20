@@ -57,6 +57,16 @@ const stapContractSchema = z.object({
     .positive()
     .nullable()
     .optional(),
+  stroomTariefNormaal: z
+    .number({ invalid_type_error: 'Voer een getal in' })
+    .positive()
+    .nullable()
+    .optional(),
+  stroomTariefDal: z
+    .number({ invalid_type_error: 'Voer een getal in' })
+    .positive()
+    .nullable()
+    .optional(),
   gasTarief: z
     .number({ invalid_type_error: 'Voer een getal in' })
     .positive()
@@ -208,7 +218,9 @@ function StapVerbruik({
             placeholder="3500"
           />
           {errors.jaarVerbruikKwh && <p className="error-msg">{errors.jaarVerbruikKwh.message}</p>}
-          <p className="text-xs text-gray-400 mt-1">Gemiddeld Nederlands huishouden: ±2.900 kWh</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Vul het <span className="font-medium text-gray-500">bruto verbruik</span> in — dus het totaal van uw meter, <span className="font-medium text-gray-500">zonder</span> aftrek van zonnepanelenopwek. Gemiddeld Nederlands huishouden: ±2.900 kWh.
+          </p>
         </div>
 
         <div>
@@ -246,11 +258,12 @@ function StapZonnepanelen({
   onVolgende: (d: StapZonnepanelenData) => void;
   onTerug: () => void;
 }) {
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<StapZonnepanelenData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<StapZonnepanelenData>({
     resolver: zodResolver(stapZonnepanelenSchema),
     defaultValues: { heeftZonnepanelen: false, ...standaard },
   });
 
+  register('heeftZonnepanelen');
   const heeft = watch('heeftZonnepanelen');
 
   return (
@@ -261,18 +274,19 @@ function StapZonnepanelen({
       />
       <div className="space-y-4">
         <div className="flex gap-3">
-          {[{ waarde: false, label: 'Nee' }, { waarde: true, label: 'Ja' }].map(({ waarde, label }) => (
-            <label key={label} className="flex-1 cursor-pointer">
-              <input {...register('heeftZonnepanelen', { setValueAs: v => v === 'true' || v === true })}
-                type="radio" value={String(waarde)} className="sr-only" />
-              <div className={`text-center py-3 rounded-lg border-2 text-sm font-medium transition-colors ${
+          {([{ waarde: false, label: 'Nee' }, { waarde: true, label: 'Ja' }] as const).map(({ waarde, label }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setValue('heeftZonnepanelen', waarde, { shouldValidate: true })}
+              className={`flex-1 text-center py-3 rounded-lg border-2 text-sm font-medium transition-colors ${
                 heeft === waarde
                   ? 'border-blue-600 bg-blue-50 text-blue-700'
                   : 'border-gray-200 text-gray-600 hover:border-gray-300'
-              }`}>
-                {label}
-              </div>
-            </label>
+              }`}
+            >
+              {label}
+            </button>
           ))}
         </div>
 
@@ -287,6 +301,7 @@ function StapZonnepanelen({
                 placeholder="4000"
               />
               {errors.jaarOpwekKwh && <p className="error-msg">{errors.jaarOpwekKwh.message}</p>}
+              <p className="text-xs text-gray-400 mt-1">Staat uw app in MWh? Vermenigvuldig dan met 1.000 (bijv. 4,2 MWh = 4.200 kWh).</p>
             </div>
             <div>
               <label className="label">Jaarlijkse teruglevering (kWh/jaar) — optioneel</label>
@@ -309,17 +324,21 @@ function StapZonnepanelen({
 
 function StapContract({
   standaard,
+  meterType,
   onVolgende,
   onTerug,
 }: {
   standaard: Partial<StapContractData>;
+  meterType: 'enkeltarief' | 'dubbeltarief';
   onVolgende: (d: StapContractData) => void;
   onTerug: () => void;
 }) {
-  const { register, handleSubmit, formState: { errors } } = useForm<StapContractData>({
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<StapContractData>({
     resolver: zodResolver(stapContractSchema),
     defaultValues: { contractType: 'vast', ...standaard },
   });
+
+  const contractType = watch('contractType');
 
   return (
     <form onSubmit={handleSubmit(onVolgende)}>
@@ -349,29 +368,54 @@ function StapContract({
           </select>
         </div>
 
-        <div>
-          <label className="label">Contracteinddatum — optioneel</label>
-          <input {...register('einddatum')} type="date" className="input-field" />
-          <p className="text-xs text-gray-400 mt-1">
-            We sturen een herinnering 3 maanden voor afloop
-          </p>
-        </div>
+        {contractType === 'vast' && (
+          <div>
+            <label className="label">Contracteinddatum — optioneel</label>
+            <input {...register('einddatum')} type="date" className="input-field" />
+            <p className="text-xs text-gray-400 mt-1">
+              We sturen een herinnering 3 maanden voor afloop
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Stroomtarief (€/kWh) — optioneel</label>
-            <input
-              {...register('stroomTarief', { valueAsNumber: true, setValueAs: v => v === '' ? null : Number(v) })}
-              type="number" step="0.0001"
-              className="input-field" placeholder="0,28"
-            />
-          </div>
+          {meterType === 'dubbeltarief' ? (
+            <>
+              <div>
+                <label className="label">Normaal tarief (€/kWh) — optioneel</label>
+                <input
+                  {...register('stroomTariefNormaal', { valueAsNumber: true, setValueAs: v => v === '' ? null : Number(v) })}
+                  type="number" step="0.00001"
+                  className="input-field" placeholder="0,28000"
+                />
+                <p className="text-xs text-gray-400 mt-1">Tarief overdag (normaal)</p>
+              </div>
+              <div>
+                <label className="label">Daltarief (€/kWh) — optioneel</label>
+                <input
+                  {...register('stroomTariefDal', { valueAsNumber: true, setValueAs: v => v === '' ? null : Number(v) })}
+                  type="number" step="0.00001"
+                  className="input-field" placeholder="0,23000"
+                />
+                <p className="text-xs text-gray-400 mt-1">Tarief 's nachts / weekend (dal)</p>
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="label">Stroomtarief (€/kWh) — optioneel</label>
+              <input
+                {...register('stroomTarief', { valueAsNumber: true, setValueAs: v => v === '' ? null : Number(v) })}
+                type="number" step="0.00001"
+                className="input-field" placeholder="0,28000"
+              />
+            </div>
+          )}
           <div>
             <label className="label">Gastarief (€/m³) — optioneel</label>
             <input
               {...register('gasTarief', { valueAsNumber: true, setValueAs: v => v === '' ? null : Number(v) })}
-              type="number" step="0.0001"
-              className="input-field" placeholder="1,05"
+              type="number" step="0.00001"
+              className="input-field" placeholder="1,05000"
             />
           </div>
         </div>
@@ -506,7 +550,9 @@ export function OnboardingWizard({
           productNaam: `${LEVERANCIERS.find((l) => l.slug === alles.leverancierSlug)?.naam ?? alles.leverancierSlug} ${alles.contractType}`,
           type: alles.contractType,
           einddatum: alles.einddatum || null,
-          stroomTarief: alles.stroomTarief ?? null,
+          stroomTarief: alles.meterType === 'dubbeltarief'
+            ? (alles.stroomTariefNormaal ?? null)
+            : (alles.stroomTarief ?? null),
           gasTarief: alles.gasTarief ?? null,
           vasteKosten: null,
         },
@@ -523,7 +569,7 @@ export function OnboardingWizard({
     <StapLocatie key="locatie" standaard={formData} onVolgende={volgende} />,
     <StapVerbruik key="verbruik" standaard={formData} onVolgende={volgende} onTerug={terug} />,
     <StapZonnepanelen key="zonnepanelen" standaard={formData} onVolgende={volgende} onTerug={terug} />,
-    <StapContract key="contract" standaard={formData} onVolgende={volgende} onTerug={terug} />,
+    <StapContract key="contract" standaard={formData} meterType={formData.meterType ?? 'enkeltarief'} onVolgende={volgende} onTerug={terug} />,
     <StapVoorkeuren key="voorkeuren" standaard={formData} laden={laden} onVolgende={afronden} onTerug={terug} />,
   ];
 
