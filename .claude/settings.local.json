@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh repo:*)",
+      "Bash(brew --version)",
+      "Bash(brew install:*)",
+      "Bash(/opt/homebrew/bin/gh auth:*)",
+      "Bash(/opt/homebrew/bin/gh repo:*)",
+      "Bash(git init:*)",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(command -v npm)",
+      "Bash(command -v node)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/local/bin/**)",
+      "Read(//Users/RonEringa/.nvm/versions/**)",
+      "Read(//Users/RonEringa/**)",
+      "Bash(/usr/bin/find /usr/local/bin /opt/homebrew/bin /usr/bin -name npm)",
+      "Bash(/usr/bin/find /Applications -name npm)",
+      "Bash(/usr/bin/find /usr/local /opt -name node -type f)",
+      "Bash(/usr/bin/find /Users/RonEringa/Library -name npm -type f)",
+      "Bash(echo \"PATH=$PATH\")",
+      "Bash(ls /Users/RonEringa/Github/EnergyCompass/frontend/src/app/\\\\\\(auth\\\\\\)/)",
+      "Bash(cat /Users/RonEringa/Github/EnergyCompass/frontend/src/app/\\\\\\(auth\\\\\\)/login/page.tsx)",
+      "Bash(npm install:*)",
+      "Bash(npm --prefix /Users/RonEringa/Github/EnergyCompass/frontend install next@latest)",
+      "Bash(openssl rand:*)"
+    ]
+  }
+}
