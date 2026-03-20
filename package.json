@@ -1,0 +1,31 @@
+{
+  "name": "energycompass",
+  "version": "1.0.0",
+  "description": "Profielgestuurde energie-beslis-app voor Nederlandse huishoudens met zonnepanelen.",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
+    "test:backend": "npm test --prefix backend",
+    "test:frontend": "npm test --prefix frontend",
+    "test:all": "npm run test:backend && npm run test:frontend && npm run test:e2e"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reringa/EnergyCompass.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/reringa/EnergyCompass/issues"
+  },
+  "homepage": "https://github.com/reringa/EnergyCompass#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
