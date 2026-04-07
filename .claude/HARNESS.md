@@ -1,0 +1,255 @@
+# Harness Context
+
+This project was scaffolded by
+[harness-engineering](https://github.com/mistervortex/harness-engineering)
+(variant: **claude-gh-railway**). The harness added automated CI/CD
+infrastructure with Railway preview environments, not application code.
+Understanding what it set up helps you work with it instead of against it.
+
+## Architecture
+
+### Branch naming drives everything
+
+```
+claude/<feature>-<sessionId>   ← you work here
+       ↓ (GitHub Action)
+feature/<feature>              ← created automatically from dev
+       ↓                         + Railway environment provisioned
+       ↓ (/mergedev)
+dev                            ← PR auto-merged
+                                 Railway environment cleaned up
+```
+
+- Pushing to a `claude/` branch triggers the Action that creates/updates
+  the corresponding `feature/` branch.
+- The feature name is derived by stripping the `claude/` prefix and
+  `-<sessionId>` suffix: `claude/dark-mode-abc123` → `feature/dark-mode`.
+- Each feature branch gets its own isolated Railway environment, duplicated
+  from dev.
+
+### Signal files
+
+- **`.pr-description.md`**: Committing this file to the repo root triggers
+  the GitHub Action to create a PR from `feature/<name>` → `dev` and
+  auto-merge it. The `/mergedev` skill writes this file for you. If the
+  frontmatter contains `review: true`, the PR is created but NOT auto-merged
+  (used by the `/review` skill). If `hotfix: true`, the hotfix workflow
+  handles it instead.
+- **`.release-description.md`**: Committing this file triggers the release
+  workflow to create a PR from `dev` → `main`, tag a version, and create a
+  GitHub Release. The `/release` skill writes this file.
+- **`.railway-url`**: Written by the GitHub Action to the feature branch.
+  Contains the Railway preview URL for this feature's environment.
+
+### `.harness-version` configuration
+
+The `.harness-version` file supports these fields:
+
+```yaml
+harness: claude-gh-railway
+version: 0.2.16
+repo: mistervortex/harness-engineering
+traits: nodejs, typescript, express
+check: npm test && npm run lint
+reviewers: teammate1, teammate2
+```
+
+- **`check`**: CI command to run on PRs to dev. When configured, the
+  `feature-branch-checks.yml` workflow runs this command, and mergedev uses
+  `gh pr merge --auto` to wait for checks.
+- **`reviewers`**: Default reviewers assigned when using `/review`.
+
+**Prerequisites for CI checks:**
+- Enable "Allow auto-merge" in GitHub repo settings (Settings → General)
+- Add a branch protection rule for `dev` requiring the "check" status check
+- Optionally add the same for `main` to gate releases and hotfixes
+
+### Hooks
+
+- **SessionStart**: Runs `.claude/scripts/session-start.sh` on every new
+  session. On a `claude/` branch, it automatically initializes the feature:
+  if the feature branch exists, it merges previous work; if not, it pushes
+  an init commit to trigger the GitHub Action (creates feature branch +
+  Railway environment). This means `/feature` is no longer required to start
+  a new chat, just describe what you want to build.
+- **PostToolUse (git push)**: Runs `.claude/hooks/post-push-railway-url.sh`
+  after every `git push`, which fetches and displays the Railway preview URL.
+
+### Railway environments
+
+Each feature gets a fully isolated Railway environment:
+- Duplicated from the `dev` environment (same services and config)
+- Deployed automatically when the feature branch is pushed
+- Cleaned up automatically when the feature is merged or the branch is deleted
+- Preview URL stored in `.railway-url` on the feature branch
+
+## Managed trait files
+
+Stack-specific best practices live in `.claude/traits/` as separate managed
+files (e.g. `.claude/traits/nodejs.md`, `.claude/traits/typescript.md`).
+These are fetched from the upstream repo's `stacks/traits/` directory and
+can be auto-updated via `/harness-upgrade`.
+
+To install traits, add the trait names to `.harness-version`:
+
+```
+traits: nodejs, typescript, express, vitest, eslint, pnpm
+```
+
+Then run `/harness-upgrade`, which will fetch the matching trait files from
+upstream and install them in `.claude/traits/`. On future upgrades, it will
+show diffs and let you update to the latest best practices.
+
+Add this line to your project's `CLAUDE.md` so the AI reads them:
+
+```
+Read `.claude/traits/` for stack-specific best practices before writing code.
+```
+
+Available traits and presets are listed in the upstream repo's `stacks/` directory.
+
+## Migration system
+
+Each harness version has a structured migration file (`migrations/X.Y.Z.yaml`)
+describing what changed. The `/harness-upgrade` skill uses these to:
+
+- **Filter by relevance**: only show changes that affect your variant and traits
+- **Categorize by priority**: REQUIRED (infrastructure), RECOMMENDED (traits),
+  INFORMATIONAL (other)
+- **Show context**: what changed and why, not just raw diffs
+
+Migration files are auto-generated by the `harness-version-bump.yml` workflow
+whenever a feature merges to dev. They are never manually authored.
+
+## Harness-managed files
+
+These files are maintained by the harness and replaced on
+`/harness-upgrade`. Do not edit them; your changes will be overwritten.
+
+| File | Purpose |
+|------|---------|
+| `.github/workflows/claude-to-feature-branch.yml` | Merges `claude/` branches into `feature/` branches |
+| `.github/workflows/claude-mergedev.yml` | Deletes Railway environment, creates PR from `feature/` to `dev`, and auto-merges (or opens for review) |
+| `.github/workflows/feature-branch-checks.yml` | Runs CI checks on PRs to dev (reads `check:` from `.harness-version`) |
+| `.github/workflows/release.yml` | Creates release PR dev → main, tags version, creates GitHub Release |
+| `.github/workflows/hotfix.yml` | Handles hotfix PRs to main, tags patch release, back-merges to dev |
+| `.github/workflows/feature-branch-railway.yml` | Creates Railway environment when a new feature branch is created |
+| `.github/workflows/feature-merge-cleanup.yml` | Deletes Railway environment and feature branch after merge to dev |
+| `.github/workflows/feature-branch-cleanup.yml` | Fallback cleanup if a feature branch is deleted manually |
+| `.claude/scripts/session-start.sh` | Session startup hook |
+| `.claude/scripts/list-skills.sh` | Skill discovery script |
+| `.claude/hooks/post-push-railway-url.sh` | Fetches Railway preview URL after push |
+| `.claude/skills/getting-started/SKILL.md` | Orientation skill |
+| `.claude/skills/feature/SKILL.md` | `/feature` skill |
+| `.claude/skills/mergedev/SKILL.md` | `/mergedev` skill |
+| `.claude/skills/review/SKILL.md` | `/review` skill: submit PR for team review |
+| `.claude/skills/release/SKILL.md` | `/release` skill: ship dev to production |
+| `.claude/skills/hotfix/SKILL.md` | `/hotfix` skill: emergency production fix |
+| `.claude/skills/status/SKILL.md` | `/status` skill: team dashboard |
+| `.claude/skills/changelog/SKILL.md` | `/changelog` skill: generate changelog |
+| `.claude/skills/deps/SKILL.md` | `/deps` skill: handle Dependabot PRs |
+| `.claude/skills/continue/SKILL.md` | `/continue` skill: resume in-progress feature |
+| `.claude/skills/rollback/SKILL.md` | `/rollback` skill: revert bad deploy |
+| `.claude/skills/harness-upgrade/SKILL.md` | `/harness-upgrade` skill |
+| `.claude/agents/docs-updater.md` | Documentation auditor agent (runs during mergedev) |
+| `.claude/HARNESS.md` | This file |
+| `.harness-version` | Version tracking |
+| `.claude/traits/*.md` | Stack best practices (managed per `traits:` in `.harness-version`) |
+
+**Note:** `harness-railway.yml` is a one-time setup workflow that
+self-destructs after its first run. It is not part of ongoing upgrades.
+
+## Harness-provided starting points
+
+The harness created these files as a starting point. You own them, so edit
+freely to match your project. On `/harness-upgrade`, these are diffed and
+you choose whether to accept upstream changes.
+
+| File | What to customize |
+|------|-------------------|
+| `.claude/settings.json` | Add your own hooks and tool permissions alongside the harness-provided ones |
+| `.github/dependabot.yml` | Add entries for your package ecosystems (npm, pip, Docker, etc.) |
+| `railway.json` | Customize build commands, start commands, healthcheck paths for your app |
+
+## Project-owned files
+
+Everything else belongs to the project. The harness does not touch:
+
+- **`CLAUDE.md`**: Your project instructions. The harness provides
+  `claude-md-snippet.md` as a starting point; copy what you need.
+- **All application code**: Source files, configs, tests, etc.
+- **Custom skills**: Any skill you add to `.claude/skills/` that isn't
+  listed above.
+
+## How to extend
+
+### Adding a skill
+
+Create `.claude/skills/<name>/SKILL.md` with YAML frontmatter (`name`,
+`description`). Custom skills are not touched by `/harness-upgrade`.
+
+### Adding an agent
+
+Create `.claude/agents/<name>.md` with YAML frontmatter (`name`,
+`description`, `allowed-tools`). Agents are autonomous specialists that
+run in their own context via the Agent tool. Custom agents are not touched
+by `/harness-upgrade`.
+
+### Adding workflows
+
+Prefer adding new workflow files in `.github/workflows/` over modifying
+harness-managed ones; new files won't be touched by upgrades.
+
+## Variant and upgrade paths
+
+This project uses the **claude-gh-railway** variant (GitHub Actions + Railway
+preview environments per feature branch).
+
+Harness variants form a hierarchy where each adds infrastructure on top of the
+previous:
+
+```
+claude-gh                          ← feature branches + auto-merge
+  └─ claude-gh-railway             ← + Railway preview environments (this project)
+       └─ claude-gh-railway-db     ← + PostgreSQL per environment
+            └─ claude-gh-railway-db-bucket  ← + S3-compatible bucket
+```
+
+All variant templates are available as zip files from the upstream repo at
+`https://github.com/mistervortex/harness-engineering/releases/latest`:
+
+| Variant | What it adds | Zip file |
+|---------|-------------|----------|
+| claude-gh | Feature branches + auto-merge | `harness-templates-claude-gh.zip` |
+| **claude-gh-railway** *(current)* | + Railway preview environments per feature | `harness-templates-claude-gh-railway.zip` |
+| claude-gh-railway-db | + Isolated PostgreSQL per environment | `harness-templates-claude-gh-railway-db.zip` |
+| claude-gh-railway-db-bucket | + Isolated S3-compatible bucket per environment | `harness-templates-claude-gh-railway-db-bucket.zip` |
+
+**To switch variant:** download the target variant's zip, extract it, and diff
+against your current harness-managed files. Add the new files (workflows,
+hooks, configs), update existing ones, and set the `harness` field in
+`.harness-version` to the new variant name.
+
+## Upgrading (same variant)
+
+Run `/harness-upgrade` to check for version updates within your current
+variant. The skill uses structured migration files to show you exactly what
+changed, filtered by your variant and installed traits. See `.harness-version`
+for current version info.
+
+### Version numbering
+
+Harness versions use semver (`MAJOR.MINOR.PATCH`):
+- **PATCH** bumps automatically on each feature merge to `dev`
+- **MINOR** bumps are a developer decision for significant releases
+- **MAJOR** is reserved for breaking architecture changes
+
+## License
+
+The Harness Companion is licensed under the **Apache License 2.0**.
+See the `LICENSE` and `NOTICE` files in the root of this repository.
+
+The NOTICE file must be preserved in any derivative works or forks.
+It attributes this project to its origin:
+[The Harness Companion](https://www.harnesscompanion.com)
+by Evolutionary Leadership Coöperatie U.A.

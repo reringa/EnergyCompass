@@ -1,0 +1,5 @@
+harness: claude-gh-railway
+version: 0.3.16
+repo: mistervortex/harness-engineering
+companion_url:
+traits:

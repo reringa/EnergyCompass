@@ -1,0 +1,159 @@
+name: Merge feature branch to dev (mergedev)
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.pr-description.md'
+
+jobs:
+  mergedev:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Extract feature name from branch
+        id: feature
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          WITHOUT_PREFIX="${BRANCH#claude/}"
+          FEATURE_NAME="${WITHOUT_PREFIX%-*}"
+          echo "name=$FEATURE_NAME" >> "$GITHUB_OUTPUT"
+          echo "branch=feature/$FEATURE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create feature branch (if new) and merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          FEATURE_BRANCH="${{ steps.feature.outputs.branch }}"
+
+          if git ls-remote --exit-code origin "$FEATURE_BRANCH" > /dev/null 2>&1; then
+            git checkout "$FEATURE_BRANCH"
+          else
+            git checkout dev
+            git checkout -b "$FEATURE_BRANCH"
+          fi
+
+          git merge ${{ github.sha }} --no-edit
+
+      - name: Delete Railway environment
+        if: env.RAILWAY_ACCOUNT_TOKEN != '' && env.RAILWAY_PROJECT_ID != ''
+        env:
+          RAILWAY_ACCOUNT_TOKEN: ${{ secrets.RAILWAY_ACCOUNT_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+        run: |
+          FEATURE_NAME="${{ steps.feature.outputs.name }}"
+          PROJECT_ID="$RAILWAY_PROJECT_ID"
+          API_URL="https://backboard.railway.com/graphql/v2"
+
+          gql() {
+            local resp
+            resp=$(curl -s -X POST "$API_URL" \
+              -H "Authorization: Bearer $RAILWAY_ACCOUNT_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"$1\"}") || true
+            if echo "$resp" | jq . >/dev/null 2>&1; then
+              echo "$resp"
+            else
+              echo '{"data":null}'
+            fi
+          }
+
+          ENVS=$(gql "query { environments(projectId: \\\"$PROJECT_ID\\\") { edges { node { id name } } } }")
+          ENV_ID=$(echo "$ENVS" | jq -r ".data.environments.edges[].node | select(.name == \"$FEATURE_NAME\") | .id // empty")
+
+          if [ -z "$ENV_ID" ]; then
+            echo "No Railway environment '$FEATURE_NAME' found, nothing to delete."
+            exit 0
+          fi
+
+          echo "Deleting Railway environment '$FEATURE_NAME' (ID: $ENV_ID)..."
+          gql "mutation { environmentDelete(id: \\\"$ENV_ID\\\") }"
+          echo "Railway environment deleted. Push will not trigger a deploy."
+
+      - name: Push feature branch
+        run: |
+          FEATURE_BRANCH="${{ steps.feature.outputs.branch }}"
+          git push origin "$FEATURE_BRANCH"
+
+      - name: Create PR and handle merge
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          FEATURE_BRANCH="${{ steps.feature.outputs.branch }}"
+          git checkout "$FEATURE_BRANCH"
+
+          # Parse frontmatter fields
+          TITLE=$(sed -n '/^---$/,/^---$/{ /^title:/{ s/^title: *//; p; } }' .pr-description.md)
+          if [ -z "$TITLE" ]; then
+            TITLE="Merge $FEATURE_BRANCH into dev"
+          fi
+          REVIEW=$(sed -n '/^---$/,/^---$/{ /^review:/{ s/^review: *//; p; } }' .pr-description.md)
+          REVIEWERS=$(sed -n '/^---$/,/^---$/{ /^reviewers:/{ s/^reviewers: *//; p; } }' .pr-description.md)
+
+          # Check if CI checks are configured
+          CHECK_CMD=$(grep '^check:' .harness-version 2>/dev/null | sed 's/^check: *//' || true)
+
+          # Parse body: everything after the second ---
+          awk 'BEGIN{c=0} /^---$/{c++; next} c>=2{print}' .pr-description.md > /tmp/pr-body.md
+
+          # Remove signal files before creating PR
+          git rm .pr-description.md
+          git rm -f --ignore-unmatch .railway-url
+          git rm -f --ignore-unmatch .harness-init
+          git commit -m "chore: remove signal files"
+          git push origin "$FEATURE_BRANCH"
+
+          # Create or reuse PR
+          EXISTING=$(gh pr list --head "$FEATURE_BRANCH" --base dev --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            PR_NUMBER="$EXISTING"
+          else
+            PR_URL=$(gh pr create --base dev --head "$FEATURE_BRANCH" --title "$TITLE" --body-file /tmp/pr-body.md)
+            PR_NUMBER=$(echo "$PR_URL" | grep -oP '/pull/\K[0-9]+')
+          fi
+
+          # Assign reviewers if configured
+          if [ -n "$REVIEWERS" ]; then
+            IFS=', ' read -ra REVIEWER_LIST <<< "$REVIEWERS"
+            for reviewer in "${REVIEWER_LIST[@]}"; do
+              reviewer=$(echo "$reviewer" | xargs)
+              [ -n "$reviewer" ] && gh pr edit "$PR_NUMBER" --add-reviewer "$reviewer" || true
+            done
+          fi
+
+          # If review mode: skip auto-merge, leave PR open for review
+          if [ "$REVIEW" = "true" ]; then
+            echo "PR #$PR_NUMBER created for review, skipping auto-merge."
+            echo "::notice::PR #$PR_NUMBER is open for review at $(gh pr view $PR_NUMBER --json url --jq .url)"
+            exit 0
+          fi
+
+          # Always try auto-merge first; handles repos with required status
+          # checks regardless of whether check: is configured in .harness-version
+          if gh pr merge "$PR_NUMBER" --auto --merge 2>/dev/null; then
+            echo "PR #$PR_NUMBER set to auto-merge once checks pass."
+            exit 0
+          fi
+
+          # Auto-merge not available (no branch protection), try immediate merge
+          for i in 1 2 3 4; do
+            if gh pr merge "$PR_NUMBER" --merge; then
+              echo "PR #$PR_NUMBER merged successfully into dev."
+              exit 0
+            fi
+            echo "Merge attempt $i failed, retrying in ${i}s..."
+            sleep "$i"
+          done
+          echo "::warning::Auto-merge failed for PR #$PR_NUMBER"
+          gh pr comment "$PR_NUMBER" --body "**Auto-merge failed**, likely due to merge conflicts with dev. Check out the feature branch locally, merge dev into it, resolve conflicts, push, and merge this PR manually."
+
+      - name: Delete source claude/ branch
+        run: git push origin --delete ${{ github.ref_name }} || true
